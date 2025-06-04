@@ -129,67 +129,100 @@ class BiliLoginBot:
         except NoSuchElementException:
             return False
     
-    def get_user_coin(self, coin_record_url="https://account.bilibili.com/account/coin", timeout=10):
+    def get_user_coin(self, coin_record_url="https://account.bilibili.com/account/coin", timeout=15, retries=3):
         """
-        获取用户硬币余额
+        获取用户硬币余额（改进版）
         :param coin_record_url: 硬币记录页面URL
         :param timeout: 超时时间（秒）
+        :param retries: 重试次数
         :return: 操作是否成功 (硬币值存储在self.coin属性中)
         """
-        try:
-            logger.info(f"正在访问硬币记录页面: {coin_record_url}")
-            
-            # 1. 导航到硬币记录页面
-            self.driver.get(coin_record_url)
-            logger.info("页面已加载")
-            
-            # 2. 等待硬币数据容器出现
-            coin_container = WebDriverWait(self.driver, timeout).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, ".coin-index-title"))
-            )
-            logger.info("已找到硬币余额容器")
-
-            # 3. 找到硬币数值元素
-            coin_element = coin_container.find_element(By.CSS_SELECTOR, "i.coin-num")
-            
-            # 4. 获取硬币数值
-            coin_value = coin_element.text
-            logger.info(f"获取到硬币余额文本: '{coin_value}'")
-
-            # 5. 解析硬币值 (去除可能的空格和特殊字符)
+        attempt = 0
+        while attempt < retries:
             try:
-                cleaned_value = coin_value.strip()  # 去除空白字符
+                logger.info(f"正在访问硬币记录页面: {coin_record_url} (尝试 {attempt+1}/{retries})")
                 
-                # 处理可能的货币符号或单位
-                if cleaned_value.endswith('硬币'):
-                    cleaned_value = cleaned_value.replace('硬币', '').strip()
+                # 1. 导航到硬币记录页面
+                self.driver.get(coin_record_url)
+                logger.info("页面已加载")
                 
-                # 转换为浮点数
-                self.coin = float(cleaned_value)
-                logger.info(f"硬币余额解析成功: {self.coin}")
-            except ValueError:
-                logger.error(f"硬币值解析失败: '{coin_value}'")
-                return False
-            
-            # 6. 返回上一页面
-            logger.info("返回上一页面...")
-            self.driver.back()
-            
-            # 7. 等待返回完成 (给页面足够时间加载)
-            time.sleep(1)
-
-            logger.info("硬币余额获取完成")
-            return True
-            
-        except TimeoutException:
-            logger.error("查找硬币元素超时")
-            return False
-        except NoSuchElementException:
-            logger.error("未找到硬币元素")
-            return False
-        except Exception as e:
-            logger.error(f"获取硬币余额时出错: {str(e)}")
-            return False
+                # 2. 等待页面完全加载（包括异步内容）
+                WebDriverWait(self.driver, timeout).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                
+                # 3. 检查登录状态（通过页面标题）
+                if "登录" in self.driver.title:
+                    logger.warning("检测到未登录状态，尝试重新登录")
+                    return False
+                
+                # 4. 使用更健壮的元素定位方式
+                # 尝试多种可能的元素定位策略
+                coin_value = None
+                selectors = [
+                    (By.CSS_SELECTOR, ".coin-index-title i.coin-num"),  # 原始选择器
+                    (By.CSS_SELECTOR, ".coin-num"),                     # 备用选择器1
+                    (By.CSS_SELECTOR, ".coin-info .num"),               # 备用选择器2
+                    (By.XPATH, "//div[contains(@class, 'coin-index-title')]//i[contains(@class, 'coin-num')]"),
+                    (By.XPATH, "//div[contains(text(), '硬币')]/following-sibling::div//i")
+                ]
+                
+                for selector in selectors:
+                    try:
+                        coin_element = WebDriverWait(self.driver, 5).until(
+                            EC.visibility_of_element_located(selector)
+                        )
+                        coin_value = coin_element.text
+                        logger.info(f"使用选择器 {selector} 获取到硬币余额文本: '{coin_value}'")
+                        if coin_value.strip():
+                            break
+                    except:
+                        continue
+                
+                if not coin_value:
+                    logger.error("所有硬币元素定位策略均失败")
+                    attempt += 1
+                    time.sleep(2)  # 短暂等待后重试
+                    continue
+                    
+                # 5. 解析硬币值
+                try:
+                    # 处理可能的格式：数字、带单位、带逗号分隔符
+                    cleaned_value = ''.join(filter(str.isdigit, coin_value))
+                    self.coin = float(cleaned_value) if cleaned_value else 0.0
+                    self.coin *= 0.1
+                    # 如果硬币为0，可能是页面未正确加载，重试
+                    if self.coin == 0 and attempt < retries - 1:
+                        logger.warning(f"获取到硬币值为0，可能是页面加载问题，将重试 (尝试 {attempt+1}/{retries})")
+                        attempt += 1
+                        time.sleep(3)  # 等待更长时间后重试
+                        self.driver.refresh()  # 刷新页面
+                        continue
+                        
+                    logger.info(f"硬币余额解析成功: {self.coin}")
+                    return True
+                    
+                except ValueError:
+                    logger.error(f"硬币值解析失败: '{coin_value}'")
+                    attempt += 1
+                    time.sleep(2)
+                    continue
+                    
+            except TimeoutException:
+                logger.error(f"页面加载超时 (尝试 {attempt+1}/{retries})")
+                attempt += 1
+                time.sleep(3)
+            except NoSuchElementException:
+                logger.error(f"未找到硬币元素 (尝试 {attempt+1}/{retries})")
+                attempt += 1
+                time.sleep(2)
+            except Exception as e:
+                logger.error(f"获取硬币余额时出错: {str(e)} (尝试 {attempt+1}/{retries})")
+                attempt += 1
+                time.sleep(3)
+        
+        logger.error(f"获取硬币余额失败，已重试{retries}次")
+        return False
 
     def save_cookies(self, filename="bili_cookies.pkl"):
         """保存登录后的cookies"""

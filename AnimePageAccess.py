@@ -207,7 +207,7 @@ class AnimePageAccess:
             if triple_action:
                 # 创建操作实例
                 triple_operator = BilibiliTripleAction(self.driver)
-                self.logger.info("***************************************")
+                
                 # 使用长按方式
                 triple_result = triple_operator.check_and_operate()
                 if triple_result == 1:

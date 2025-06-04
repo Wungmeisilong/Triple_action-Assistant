@@ -22,7 +22,7 @@ class BilibiliTripleAction:
             )
             
             # 单次等待替代多次等待
-            elements = WebDriverWait(self.driver, 5).until(
+            elements = WebDriverWait(self.driver, 3.5).until(
                 EC.presence_of_all_elements_located((By.CSS_SELECTOR, combined_selector))
             )
             return len(elements) == 3
@@ -182,8 +182,8 @@ class BilibiliTripleAction:
         """
         max_attempts = 1
         methods = [
-            self.perform_triple_action,
-            #self.try_long_press
+            self.perform_triple_action # 使用组合方法执行三连
+            #self.try_long_press #长按实现一键三连
         ]
 
         for attempt in range(max_attempts):
@@ -203,8 +203,8 @@ class BilibiliTripleAction:
                     self.logger.error(f"执行方法时出错: {str(e)}")
                 
                 # 尝试间短暂等待
-                time.sleep(1)
-        
+                time.sleep(0.7)
+
         return False
     
     def try_long_press(self):
@@ -252,7 +252,7 @@ class BilibiliTripleAction:
             self.logger.error(f"长按操作失败: {str(e)}")
             return False
     
-    def check_and_operate(self):
+    def check_and_operate(self,end_time=0):
         """
         主操作逻辑
         """
